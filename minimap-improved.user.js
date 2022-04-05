@@ -1,528 +1,456 @@
 // ==UserScript==
-// @name         PixelCanvas Minimap Improved
+// @name         PixelCanvas Minimap Rewrite
 // @namespace    http://tampermonkey.net/
 // @version      0.1
-// @description  Rewritten PixelCanvas Minimap with various quality of life improvements.
+// @description  PixelCanvas Minimap for all templates.
 // @author       Levi_OP
 // @match        *://pixelcanvas.io/*
-// @connect      zergmafia.top/
 // @require      https://openuserjs.org/src/libs/sizzle/GM_config.js
 // @grant        GM_getValue
 // @grant        GM_setValue
-// @grant        GM.xmlHttpRequest
 // ==/UserScript==
+/*globals GM_config*/
 
-// This userscript is licensed under CC BY-NC-SA (https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode) by EMF - We are Aweseome (http://mlpixel.org/emf)
-// Licence Informations:
-// This userscript is distributed under the CC BY-NC-SA
-// You are free to copy and redistribute the material in any medium or format and to
-// remix, transform and build upon the material under the terms that you must give
-// appropriate credit, it is non-commercial and that you distribute your contributions
-// under the same license as the orginial.
-// Keep in mind that just mentioning the license and creator in the source code is not appropriate credit, because it is
-// not visible by users. Appropriate credits are putting the license, creater, disclaimer and other by the CC BY-NC-SA required
-// attributions visible under the minimap. Use the licensing informations that are already provided.
+(function() {
+    'use strict';
 
-cssStyle = `
-#minimapbg {
-  position: absolute;
-  right: 1em;
-  bottom: 1em;
-}
-
-#posyt {
-  background-color: rgba(0, 0, 0, 0.75);
-  color: rgb(250, 250, 250);
-  text-align: center;
-  line-height: 42px;
-  vertical-align: middle;
-  width: auto;
-  height: auto;
-  border-radius: 21px;
-  padding: 6px;
-}
-
-#minimap-text {
-  display: none;
-}
-
-#minimap-box {
-  position: relative;
-  width:420px;
-  height:300px;
-}
-
-#minimap, #minimap-board, #minimap-cursor {
-  width: 100%;
-  height: 100%;
-  position:absolute;
-  top:0;
-  left:0;
-}
-
-#minimap {
-  z-index:1;
-}
-
-#minimap-board {
-  z-index:2;
-}
-
-#minimap-cursor {
-  z-index:3;
-}
-
-#minimap-config {
-  line-height:20px;
-}
-
-.map-clickable {
-  cursor: pointer;
-}
-
-.map-zoom {
-  font-weight:bold;
-}
-
-/*#colors {
-  margin-left: 0.333em !important;
-}
-
-#app > div:nth-child(1) > div:nth-child(9) {
-  position: absolute;
-  bottom: 6em;
-  left: 0.3333em;
-
-}
-
-#app > div:nth-child(1) > div:nth-child(9) > div:nth-child(2) {
-  bottom: initial !important;
-  left: initial !important;
-  position: initial !important;
-  display: inline-block !important;
-}
-
-#app > div:nth-child(1) > div:nth-child(9) > div:nth-child(1) {
-  bottom: initial !important;
-  left: initial !important;
-  position: initial !important;
-  display: inline-block !important;
-}*/`;
-
-htmlFragment = `
-<div id="minimapbg">
-  <div class="posy" id="posyt">
-    <div id="minimap-text"></div>
-    <div id="minimap-box">
-      <canvas id="minimap"></canvas>
-      <canvas id="minimap-board"></canvas>
-      <canvas id="minimap-cursor"></canvas>
-    </div>
-    <div id="minimap-config">
-      <span class="map-clickable" id="hide-map">Hide Map</span>
-      |
-      <span class="map-clickable" id="follow-mouse">Follow Mouse</span>
-      |
-	  <span class="map-clickable" id="config">Config</span>
-	  |
-      <span class="map-clickable" id="toggle-grid">Toggle Grid</span>
-      |
-      Zoom:
-      <span class="map-clickable map-zoom" id="zoom-plus">+</span>
-      /
-      <span class="map-clickable map-zoom" id="zoom-minus">-</span>
-    </div>
-  </div>
-</div>`;
-
-window.addEventListener('load', function() {
-  // Regular Expression to get coordinates out of URL
-  re = /(.*)@(.*),(.*)/g;
-  // Regular Expression to get coordinates from cursor
-  rec = /\((.*), (.*)\)/g;
-  gameWindow = document.getElementById("gameWindow");
-  // DOM element of the displayed X, Y variables
-  coorDOM = null;
-  findCoor();
-  // coordinates of the middle of the window
-  x_window = 0;
-  y_window = 0;
-  // coordinates of cursor
-  x = 0;
-  y = 0;
-  // list of all available templates
-  template_list = null;
-  zoomlevel = 9;
-  // toggle options
-  toggle_show = true;
-  toggle_follow = true; //if minimap is following window, x_window = x and y_window = y;
-  toggle_grid = true;
-  config = false;
-
-  zoom_state = 0;
-  zoom_time = 100;
-  // array with all loaded template-images
-  image_list = [];
-  counter = 0;
-  // templates which are needed in the current area
-  needed_templates = null;
-  // Cachebreaker to force refresh
-  cachebreaker = null;
-
-  // Set style
-  addGlobalStyle(cssStyle);
-
-  // Add minimap
-  var div = document.createElement('div');
-  div.setAttribute('class', 'post block bc2');
-  div.innerHTML = htmlFragment;
-  document.body.appendChild(div);
-
-  // Setup canvas
-  minimap = document.getElementById("minimap");
-  minimap_board = document.getElementById("minimap-board");
-  minimap_cursor = document.getElementById("minimap-cursor");
-  minimap.width  = minimap.offsetWidth;
-  minimap_board.width  = minimap_board.offsetWidth;
-  minimap_cursor.width  = minimap_cursor.offsetWidth;
-  minimap.height = minimap.offsetHeight;
-  minimap_board.height = minimap_board.offsetHeight;
-  minimap_cursor.height = minimap_cursor.offsetHeight;
-  ctx_minimap = minimap.getContext("2d");
-  ctx_minimap_board = minimap_board.getContext("2d");
-  ctx_minimap_cursor = minimap_cursor.getContext("2d");
-
-  // No Antialiasing when scaling!
-  ctx_minimap.mozImageSmoothingEnabled = false;
-  ctx_minimap.webkitImageSmoothingEnabled = false;
-  ctx_minimap.msImageSmoothingEnabled = false;
-  ctx_minimap.imageSmoothingEnabled = false;
-
-  ctx_minimap_board.mozImageSmoothingEnabled = false;
-  ctx_minimap_board.webkitImageSmoothingEnabled = false;
-  ctx_minimap_board.msImageSmoothingEnabled = false;
-  ctx_minimap_board.imageSmoothingEnabled = false;
-
-  drawBoard();
-  drawCursor();
-
-  // Setup events
-  document.getElementById("hide-map").onclick = function(){
-    console.log("This should do something, but it doesn't");
-    toggle_show = false;
-    document.getElementById("minimap-box").style.display = "none";
-    document.getElementById("minimap-config").style.display = "none";
-    document.getElementById("minimap-text").style.display = "block";
-    document.getElementById("minimap-text").innerHTML = "Show Minimap";
-    document.getElementById("minimap-text").style.cursor = "pointer";
-  };
-
-  document.getElementById("minimap-text").onclick = function(){
-    toggle_show = true;
-    document.getElementById("minimap-box").style.display = "block";
-    document.getElementById("minimap-config").style.display = "block";
-    document.getElementById("minimap-text").style.display = "none";
-    document.getElementById("minimap-text").style.cursor = "default";
-    loadTemplates();
-  };
-
-  document.getElementById("zoom-plus").addEventListener('mousedown', function(e){
-    e.preventDefault();
-    zoom_state = +1;
-    zoom();
-  }, false);
-  document.getElementById("zoom-minus").addEventListener('mousedown', function(e){
-    e.preventDefault();
-    zoom_state = -1;
-    zoom();
-  }, false);
-  document.getElementById("zoom-plus").addEventListener('mouseup', function(e){ zoom_state = 0;}, false);
-  document.getElementById("zoom-minus").addEventListener('mouseup', function(e){ zoom_state = 0;}, false);
-
-  document.getElementById("follow-mouse").onclick = function(){
-    toggle_follow = !toggle_follow;
-    if(toggle_follow){
-      this.innerHTML = "Follow Mouse";
-      loadTemplates();
-      x_window = x;
-      y_window = y;
-      drawCursor();
-    } else {
-      this.innerHTML = "Follow Window";
-      getCenter();
+    const cssStyle = `
+    #minimapbg {
+        position: absolute;
+        right: 1em;
+        bottom: 1em;
     }
-  };
 
-  document.getElementById("toggle-grid").onclick = function(){
-    toggle_grid = !toggle_grid;
-    drawBoard();
-  };
-  
-  document.getElementById("config").onclick = function(){
-    config = !config;
-    if(config)
-		GM_config.open();
-	else
-		GM_config.close();
-  };
+    #posyt {
+        background-color: rgba(0, 0, 0, 0.75);
+        color: rgb(250, 250, 250);
+        text-align: center;
+        line-height: 42px;
+        vertical-align: middle;
+        width: ato;
+        height: auto;
+        border-radius: 8px;
+        padding: 6px;
+    }
 
-  gameWindow.addEventListener('mouseup',function(evt){
-    if(!toggle_show)
-      return;
-    if(!toggle_follow)
-      setTimeout(getCenter, 100);
-  },false);
+    #minimap-text {
+        display: none;
+    }
 
-  gameWindow.addEventListener('mousemove',function(evt){
-    if(!toggle_show)
-      return;
-    x_new = coorDOM.innerHTML.replace(rec, '$1');
-    y_new = coorDOM.innerHTML.replace(rec, '$2');
-    if (x != x_new || y != y_new){
-      x = x_new;
-      y = y_new;
-      if(toggle_follow){
-        x_window = x;
-        y_window = y;
-      } else {
+    #minimap-box {
+        position: relative;
+        width:420px;
+        height:300px;
+        margin: 3px;
+    }
+
+    #minimap, #minimap-board, #minimap-cursor {
+        width: 100%;
+        height: 100%;
+        position:absolute;
+        top:0;
+        left:0;
+    }
+
+    #minimap {
+        z-index:1;
+    }
+
+    #minimap-board {
+        z-index:2;
+    }
+
+    #minimap-cursor {
+        z-index:3;
+    }
+
+    #minimap-config {
+        font-size: 14px;
+        line-height:20px;
+    }
+
+    .map-clickable {
+        cursor: pointer;
+    }
+
+    .map-zoom {
+        font-weight:bold;
+    }`;
+
+    const htmlFragment = `
+    <div id="minimapbg">
+        <div class="posy" id="posyt">
+            <div id="minimap-text"></div>
+            <div id="minimap-box">
+                <canvas id="minimap"></canvas>
+                <canvas id="minimap-board"></canvas>
+                <canvas id="minimap-cursor"></canvas>
+            </div>
+            <div id="minimap-config">
+                <span class="map-clickable" id="hide-map">Hide Map</span>
+                |
+                <span class="map-clickable" id="follow-mouse">Follow Mouse</span>
+                |
+                <span class="map-clickable" id="config">Config</span>
+                |
+                <span class="map-clickable" id="toggle-grid">Toggle Grid</span>
+                |
+                Zoom:
+                <span class="map-clickable map-zoom" id="zoom-plus">+</span>
+                /
+                <span class="map-clickable map-zoom" id="zoom-minus">-</span>
+            </div>
+        </div>
+    </div>`;
+
+    window.addEventListener('load', () => {
+        // Remove annoying alerts
+        document.querySelector("[role=alert]")?.remove();
+
+        // Regular Expression to get coordinates out of URL
+        const re = /(.*)@(.*),(.*)/g;
+
+        // Regular Expression to get coordinates from cursor
+        const rec = /\((.*), (.*)\)/g;
+        const gameWindow = document.getElementById("gameWindow");
+
+        // DOM element of the displayed X, Y variables
+        let coorDOM = Array.from(Array.from(document.getElementById("app").children).slice(-1)[0].children).slice(-1)[0].children[0];
+
+        // coordinates of the middle of the window
+        let x_window = 0;
+        let y_window = 0;
+
+        // coordinates of cursor
+        let x = 0;
+        let y = 0;
+
+        // list of all available templates
+        let template_list = null;
+
+        // toggle options
+        if (!GM_getValue("options") || JSON.stringify(Object.keys(JSON.parse(GM_getValue("options")))) !== JSON.stringify(["show", "follow", "grid", "zoomlevel"])) {
+            GM_setValue("options", JSON.stringify({
+                show: true,
+                follow: true,
+                grid: true,
+                zoomlevel: 9
+            }));
+        }
+        let options = JSON.parse(GM_getValue("options"));
+        let config = false;
+        let zoom_state = 0;
+        let zoom_time = 100;
+
+        // array with all loaded template-images
+        let image_list = [];
+        let counter = 0;
+
+        // templates which are needed in the current area
+        let needed_templates = null;
+
+        // Set style
+        addGlobalStyle(cssStyle);
+
+        // Add minimap
+        let div = document.createElement('div');
+        div.innerHTML = htmlFragment;
+        document.body.appendChild(div);
+
+        // Setup canvas
+        const minimap = document.getElementById("minimap");
+        const minimap_board = document.getElementById("minimap-board");
+        const minimap_cursor = document.getElementById("minimap-cursor");
+        minimap.width = minimap.offsetWidth;
+        minimap_board.width = minimap_board.offsetWidth;
+        minimap_cursor.width = minimap_cursor.offsetWidth;
+        minimap.height = minimap.offsetHeight;
+        minimap_board.height = minimap_board.offsetHeight;
+        minimap_cursor.height = minimap_cursor.offsetHeight;
+        const ctx_minimap = minimap.getContext("2d");
+        const ctx_minimap_board = minimap_board.getContext("2d");
+        const ctx_minimap_cursor = minimap_cursor.getContext("2d");
+
+        // No Antialiasing when scaling!
+        ctx_minimap.mozImageSmoothingEnabled = false;
+        ctx_minimap.webkitImageSmoothingEnabled = false;
+        ctx_minimap.msImageSmoothingEnabled = false;
+        ctx_minimap.imageSmoothingEnabled = false;
+
+        ctx_minimap_board.mozImageSmoothingEnabled = false;
+        ctx_minimap_board.webkitImageSmoothingEnabled = false;
+        ctx_minimap_board.msImageSmoothingEnabled = false;
+        ctx_minimap_board.imageSmoothingEnabled = false;
+
+        drawBoard();
         drawCursor();
-      }
-      loadTemplates();
-    }
-  },false);
-  
-  // Setting up config
-  // TODO: Custom field types?
-  GM_config.init(
-  {
-	'id': 'minimap',
-	'fields':
-	{
-		'templates':
-		{
-			'label': 'Templates - YOU WILL NEED TO REFRESH AFTER YOU ADD A TEMPLATE',
-			'type': 'textarea',
-			'default': '[\n{"filename":"uk7uvv.png","height":360,"width":360,"x":3059,"y":-15374}\n]'
-		}
-	}
-  });
-  
-  //GM_config.open();
-  
-  updateloop();
-}, false);
 
-function addGlobalStyle(css) {
-  var head, style;
-  head = document.getElementsByTagName('head')[0];
-  if (!head) { return; }
-  style = document.createElement('style');
-  style.type = 'text/css';
-  style.innerHTML = css;
-  head.appendChild(style);
-}
+        // Setup events
+        document.getElementById("hide-map").onclick = () => {
+            //console.log("This should do something, but it doesn't");
+            options.show = false;
+            GM_setValue("options", JSON.stringify(options));
+            document.getElementById("minimap-box").style.display = "none";
+            document.getElementById("minimap-config").style.display = "none";
+            document.getElementById("minimap-text").style.display = "block";
+            document.getElementById("minimap-text").innerHTML = "Show Minimap";
+            document.getElementById("minimap-text").style.cursor = "pointer";
+        };
 
-function updateloop(){
-  console.log("Updating Template List");
-  // Get JSON of available templates
-  
-  /*GM.xmlHttpRequest({
-    method: "GET",
-    url: `https://raw.githubusercontent.com/kekw-420/TestRepo420/master/templates.json`,
-    onload: function(response) {
-      template_list = JSON.parse(response.responseText);
-      if(!toggle_follow)
-        getCenter();
-    }
-  });*/
-  
-template_list = JSON.parse(GM_config.get('templates'));
-if(!toggle_follow)
-	getCenter();
+        document.getElementById("minimap-text").onclick = () => {
+            options.show = true;
+            GM_setValue("options", JSON.stringify(options));
+            document.getElementById("minimap-box").style.display = "block";
+            document.getElementById("minimap-config").style.display = "block";
+            document.getElementById("minimap-text").style.display = "none";
+            document.getElementById("minimap-text").style.cursor = "default";
+            loadTemplates();
+        };
 
-  setTimeout(updateloop, 600000);
-}
+        document.getElementById("zoom-plus").addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            zoom_state = +1;
+            zoom();
+        }, false);
+        document.getElementById("zoom-minus").addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            zoom_state = -1;
+            zoom();
+        }, false);
+        
+        document.getElementById("zoom-plus").addEventListener('mouseup', () => { zoom_state = 0; }, false);
+        document.getElementById("zoom-minus").addEventListener('mouseup', () => { zoom_state = 0; }, false);
 
-function toggleShow(){
-  toggle_show = !toggle_show;
-  if (toggle_show){
-    document.getElementById("minimap-box").style.display = "block";
-    document.getElementById("minimap-config").style.display = "block";
-    document.getElementById("minimap-text").style.display = "none";
-    document.getElementById("minimapbg").onclick = function(){};
-    loadTemplates();
-  } else {
-    document.getElementById("minimap-box").style.display = "none";
-    document.getElementById("minimap-config").style.display = "none";
-    document.getElementById("minimap-text").style.display = "block";
-    document.getElementById("minimap-text").innerHTML = "Show Minimap";
-    document.getElementById("minimapbg").onclick = function(){toggleShow();};
-  }
-}
+        document.getElementById("follow-mouse").onclick = function() {
+            options.follow = !options.follow;
+            GM_setValue("options", JSON.stringify(options));
+            if(options.follow) {
+                this.innerHTML = "Follow Mouse";
+                loadTemplates();
+                x_window = x;
+                y_window = y;
+                drawCursor();
+            } else {
+                this.innerHTML = "Follow Window";
+                getCenter();
+            }
+        };
 
-function clampZoom(zoom) {
-  return Math.min(45, Math.max(1,zoom));
-}
+        document.getElementById("toggle-grid").onclick = () => {
+            options.grid = !options.grid;
+            GM_setValue("options", JSON.stringify(options));
+            drawBoard();
+        };
 
-function zoom() {
-  if(!zoom_state)
-    return;
+        document.getElementById("config").onclick = () => {
+            config = !config;
+            config ? GM_config.open() : GM_config.close();
+        };
 
-  zoomlevel = clampZoom(zoomlevel * Math.pow(1.1, zoom_state));
+        gameWindow.addEventListener('mouseup', () => {
+            if(!options.show) return;
+            if(!options.follow) setTimeout(getCenter, 100);
+        }, false);
 
-  drawBoard();
-  drawCursor();
-  loadTemplates();
-  setTimeout(zoom, zoom_time);
-}
+        gameWindow.addEventListener('mousemove', () => {
+            if(!options.show) return;
+            const x_new = coorDOM.innerHTML.replace(rec, '$1');
+            const y_new = coorDOM.innerHTML.replace(rec, '$2');
+            if (x != x_new || y != y_new) {
+                x = x_new;
+                y = y_new;
+                if(options.follow){
+                    x_window = x;
+                    y_window = y;
+                } else {
+                    drawCursor();
+                }
+                loadTemplates();
+            }
+        }, false);
 
+        // Setting up config
+        GM_config.init({
+            'id': 'minimap',
+            'fields':
+            {
+                'templates':
+                {
+                    'label': 'Templates',
+                    'type': 'textarea',
+                    'default': '[\n{"url":"uk7uvv.png","height":360,"width":360,"x":3059,"y":-15374}\n]'
+                }
+            },
+            'css': '.config_var { height: 80%; } textarea { width: 100%; height: 100%; }'
+        });
 
-function loadTemplates(){
-  if(!toggle_show)
-    return;
-  if(template_list == null)
-    return;
+        GM_config.onSave = update;
 
-  var x_left   = x_window*1 - minimap.width  / zoomlevel / 2;
-  var x_right  = x_window*1 + minimap.width  / zoomlevel / 2;
-  var y_top    = y_window*1 - minimap.height / zoomlevel / 2;
-  var y_bottom = y_window*1 + minimap.height / zoomlevel / 2;
+        update();
 
-  needed_templates = [];
+        function addGlobalStyle(css) {
+            var head, style;
+            head = document.getElementsByTagName('head')[0];
+            if (!head) { return; }
+            style = document.createElement('style');
+            style.type = 'text/css';
+            style.innerHTML = css;
+            head.appendChild(style);
+        }
 
-  for(var i = 0; i < template_list.length; i++) {
-    var temp_x  = template_list[i]["x"]*1;
-    var temp_y  = template_list[i]["y"]*1;
-    var temp_xr = template_list[i]["x"]*1 + template_list[i]["width"]*1;
-    var temp_yb = template_list[i]["y"]*1 + template_list[i]["height"]*1;
-    if ( temp_xr < x_left || temp_yb < y_top || temp_x >= x_right || temp_y >= y_bottom)
-      continue;
-    //console.log(" Template " + template_list[i]["filename"] + " is in range!");
-    needed_templates.push(template_list[i]);
-  }
+        function update() {
+            console.log("Updating Template List");
+            template_list = JSON.parse(GM_config.get('templates'));
+            if(!options.follow) getCenter();
+        }
 
-  if(needed_templates.length == 0){
-    if(zoom_state == false){
-      document.getElementById("minimap-box").style.display = "none";
-      document.getElementById("minimap-text").style.display = "block";
-      document.getElementById("minimap-text").innerHTML = "No Template in this area";
-    }
-  } else {
-    document.getElementById("minimap-box").style.display = "block";
-    document.getElementById("minimap-text").style.display = "none";
-    counter = 0;
+        function clampZoom(zoom) {
+            return Math.min(45, Math.max(1,zoom));
+        }
 
-    for(var i = 0; i < needed_templates.length; i++){
-      if(image_list[needed_templates[i]["filename"]] == null){
-        loadImage(needed_templates[i]);
-      } else {
-        counter += 1;
-        //if last needed image loaded, start drawing
-        if (counter == needed_templates.length)
-          drawTemplates();
-      }
-    }
-  }
-}
+        function zoom() {
+            if(!zoom_state) return;
 
-function loadImage(templatearray){
-  var imagepath = templatearray["filename"];
-  console.log("    Load image " + imagepath);
-  image_list[imagepath] = new Image();
-  image_list[imagepath].src = "https://zergmafia.top/" + imagepath;
-  image_list[imagepath].onload = function() {
-    counter += 1;
-    // if last needed image loaded, start drawing
-    if (counter == needed_templates.length)
-      drawTemplates();
-  };
-}
+            options.zoomlevel = clampZoom(options.zoomlevel * Math.pow(1.1, zoom_state));
+            GM_setValue("options", JSON.stringify(options));
 
-function drawTemplates(){
-  ctx_minimap.clearRect(0,0,minimap.width,minimap.height);
-  var x_left = x_window*1 - minimap.width / zoomlevel / 2;
-  var y_top = y_window*1 - minimap.height / zoomlevel / 2;
-  var i;
-  for(i = 0; i < needed_templates.length; i++){
-    var template = needed_templates[i];
-    var filename = template["filename"];
-    var xoff = (template["x"]*1 - x_left*1) * zoomlevel;
-    var yoff = (template["y"]*1 - y_top*1) * zoomlevel;
-    var newwidth = zoomlevel * image_list[filename].width;
-    var newheight = zoomlevel * image_list[filename].height;
-    var img = image_list[filename];
-    ctx_minimap.drawImage(img, xoff, yoff, newwidth, newheight);
-  }
-}
-
-function drawBoard(){
-  ctx_minimap_board.clearRect(0,0,minimap_board.width,minimap_board.height);
-
-  if (zoomlevel <= 4.6 || !toggle_grid)
-    return;
-
-  ctx_minimap_board.beginPath();
-  var bw = minimap_board.width + zoomlevel;
-  var bh = minimap_board.height + zoomlevel;
-  var xoff_m = (minimap.width / 2) % zoomlevel - zoomlevel;
-  var yoff_m = (minimap.height / 2) % zoomlevel - zoomlevel;
-  var z = zoomlevel;
-
-  ctx_minimap_board.fillStyle = "rgba(0,0,0,0.75)";
-
-  for (var x = 0; x <= bw; x += z) {
-    ctx_minimap_board.fillRect(x +  xoff_m, yoff_m, 1, bh);
-  }
-
-  for (var y = 0; y <= bh; y += z) {
-    ctx_minimap_board.fillRect(xoff_m, y + yoff_m, bw, 1);
-  }
-}
+            drawBoard();
+            drawCursor();
+            loadTemplates();
+            setTimeout(zoom, zoom_time);
+        }
 
 
-function drawCursor(){
-  var x_left = x_window*1 - minimap.width / zoomlevel / 2;
-  var x_right = x_window*1 + minimap.width / zoomlevel / 2;
-  var y_top = y_window*1 - minimap.height / zoomlevel / 2;
-  var y_bottom = y_window*1 + minimap.height / zoomlevel / 2;
-  ctx_minimap_cursor.clearRect(0,0,minimap_cursor.width,minimap_cursor.height);
-  if( x < x_left || x > x_right || y < y_top || y > y_bottom)
-    return;
-  xoff_c = x - x_left;
-  yoff_c = y - y_top;
+        function loadTemplates() {
+            if(!options.show) return;
+            if(template_list == null) return;
 
-  ctx_minimap_cursor.beginPath();
-  ctx_minimap_cursor.lineWidth = Math.min(4, zoomlevel / 3);
-  ctx_minimap_cursor.strokeStyle = "red";
-  ctx_minimap_cursor.rect(zoomlevel * xoff_c, zoomlevel * yoff_c, zoomlevel, zoomlevel);
-  ctx_minimap_cursor.stroke();
+            const x_left   = x_window*1 - minimap.width  / options.zoomlevel / 2;
+            const x_right  = x_window*1 + minimap.width  / options.zoomlevel / 2;
+            const y_top    = y_window*1 - minimap.height / options.zoomlevel / 2;
+            const y_bottom = y_window*1 + minimap.height / options.zoomlevel / 2;
 
-}
+            needed_templates = [];
 
-function getCenter(){
-  var url = window.location.href;
-  x_window = url.replace(re, '$2');
-  y_window = url.replace(re, '$3');
-  if(x_window == url || y_window == url){
-    x_window = 0;
-    y_window = 0;
-  }
-  loadTemplates();
-}
+            for(let i = 0; i < template_list.length; i++) {
+                const temp_x  = template_list[i]["x"]*1;
+                const temp_y  = template_list[i]["y"]*1;
+                const temp_xr = template_list[i]["x"]*1 + template_list[i]["width"]*1;
+                const temp_yb = template_list[i]["y"]*1 + template_list[i]["height"]*1;
+                if ( temp_xr < x_left || temp_yb < y_top || temp_x >= x_right || temp_y >= y_bottom) continue;
+                //console.log(" Template " + template_list[i]["url"] + " is in range!");
+                needed_templates.push(template_list[i]);
+            }
 
-function findCoor(){
-    /*
-  //all elements with style attributes
-  var elms = document.querySelectorAll("*[style]");
-  // Loop and find the element with the right style attributes
-  Array.prototype.forEach.call(elms, function(elm) {
-    var style = elm.style.cssText;
-    if (style == "position: absolute; left: 1em; bottom: 1em;"){
-      console.log("Found It!");
-      coorDOM = elm.firstChild;
-      console.log(coorDOM.innerHTML);
-    }
-  });
-  */
-  coorDOM = Array.from(Array.from(document.getElementById("app").children).slice(-1)[0].children).slice(-1)[0].children[0]
-}
+            if(needed_templates.length == 0) {
+                if(zoom_state == false) {
+                    ctx_minimap.clearRect(0,0,minimap.width,minimap.height);
+                    //document.getElementById("minimap").style.display = "none";
+                    //document.getElementById("minimap-text").style.display = "block";
+                    //document.getElementById("minimap-text").innerHTML = "No Template in this area";
+                }
+            } else {
+                document.getElementById("minimap").style.display = "block";
+                //document.getElementById("minimap-text").style.display = "none";
+                counter = 0;
+
+                for(let i = 0; i < needed_templates.length; i++) {
+                    if(image_list[needed_templates[i]["url"]] == null) {
+                        loadImage(needed_templates[i]);
+                    } else {
+                        counter += 1;
+                        //if last needed image loaded, start drawing
+                        if (counter == needed_templates.length) drawTemplates();
+                    }
+                }
+            }
+        }
+
+        async function loadImage(templatearray) {
+            const imageurl = templatearray["url"];
+            console.log("Load image " + imageurl);
+            image_list[imageurl] = new Image();
+            //image_list[imageurl].src = "https://zergmafia.top/" + imageurl;
+            const data = await fetch(imageurl).then(r => r.blob()).then(b => new Promise((res, rej) => {
+                const reader = new FileReader();
+                reader.onloadend = () => res(reader.result);
+                reader.onerror = rej;
+                reader.readAsDataURL(b);
+            }))
+            image_list[imageurl].onload = () => {
+
+                counter += 1;
+                // if last needed image loaded, start drawing
+                if (counter == needed_templates.length) drawTemplates();
+            };
+            image_list[imageurl].src = data;
+        }
+
+        function drawTemplates() {
+            ctx_minimap.clearRect(0,0,minimap.width,minimap.height);
+            const x_left = x_window*1 - minimap.width / options.zoomlevel / 2;
+            const y_top = y_window*1 - minimap.height / options.zoomlevel / 2;
+            for(let i = 0; i < needed_templates.length; i++) {
+                const template = needed_templates[i];
+                const url = template["url"];
+                const xoff = (template["x"]*1 - x_left*1) * options.zoomlevel;
+                const yoff = (template["y"]*1 - y_top*1) * options.zoomlevel;
+                const newwidth = options.zoomlevel * image_list[url].width;
+                const newheight = options.zoomlevel * image_list[url].height;
+                const img = image_list[url];
+                ctx_minimap.drawImage(img, xoff, yoff, newwidth, newheight);
+            }
+        }
+
+        function drawBoard() {
+            ctx_minimap_board.clearRect(0,0,minimap_board.width,minimap_board.height);
+
+            if (options.zoomlevel <= 4.6 || !options.grid) return;
+
+            ctx_minimap_board.beginPath();
+            const bw = minimap_board.width + options.zoomlevel;
+            const bh = minimap_board.height + options.zoomlevel;
+            const xoff_m = (minimap.width / 2) % options.zoomlevel - options.zoomlevel;
+            const yoff_m = (minimap.height / 2) % options.zoomlevel - options.zoomlevel;
+            const z = options.zoomlevel;
+
+            ctx_minimap_board.fillStyle = "rgba(0,0,0,0.75)";
+
+            for (let x = 0; x <= bw; x += z) {
+                ctx_minimap_board.fillRect(x + xoff_m, yoff_m, 1, bh);
+            }
+
+            for (let y = 0; y <= bh; y += z) {
+                ctx_minimap_board.fillRect(xoff_m, y + yoff_m, bw, 1);
+            }
+        }
+
+        function drawCursor() {
+            const x_left = x_window*1 - minimap.width / options.zoomlevel / 2;
+            const x_right = x_window*1 + minimap.width / options.zoomlevel / 2;
+            const y_top = y_window*1 - minimap.height / options.zoomlevel / 2;
+            const y_bottom = y_window*1 + minimap.height / options.zoomlevel / 2;
+            ctx_minimap_cursor.clearRect(0,0,minimap_cursor.width,minimap_cursor.height);
+            if( x < x_left || x > x_right || y < y_top || y > y_bottom) return;
+            const xoff_c = x - x_left;
+            const yoff_c = y - y_top;
+
+            ctx_minimap_cursor.beginPath();
+            ctx_minimap_cursor.lineWidth = Math.min(4, options.zoomlevel / 3);
+            ctx_minimap_cursor.strokeStyle = "red";
+            ctx_minimap_cursor.rect(options.zoomlevel * xoff_c, options.zoomlevel * yoff_c, options.zoomlevel, options.zoomlevel);
+            ctx_minimap_cursor.stroke();
+        }
+
+        function getCenter() {
+            const url = window.location.href;
+            x_window = url.replace(re, '$2');
+            y_window = url.replace(re, '$3');
+            if(x_window == url || y_window == url) {
+                x_window = 0;
+                y_window = 0;
+            }
+            loadTemplates();
+        }
+    }, false);
+})();
