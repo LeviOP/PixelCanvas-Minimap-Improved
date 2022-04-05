@@ -208,18 +208,26 @@
         };
 
         document.getElementById("zoom-plus").addEventListener('mousedown', (e) => {
+            if (e.which !== 1) return;
             e.preventDefault();
             zoom_state = +1;
             zoom();
         }, false);
         document.getElementById("zoom-minus").addEventListener('mousedown', (e) => {
+            if (e.which !== 1) return;
             e.preventDefault();
             zoom_state = -1;
             zoom();
         }, false);
-        
-        document.getElementById("zoom-plus").addEventListener('mouseup', () => { zoom_state = 0; }, false);
-        document.getElementById("zoom-minus").addEventListener('mouseup', () => { zoom_state = 0; }, false);
+
+        document.getElementById("zoom-plus").addEventListener('mouseup', (e) => {
+            if (e.which !== 1) return;
+            zoom_state = 0; 
+        }, false);
+        document.getElementById("zoom-minus").addEventListener('mouseup', (e) => {
+            if (e.which !== 1) return;
+            zoom_state = 0;
+        }, false);
 
         document.getElementById("follow-mouse").onclick = function() {
             options.follow = !options.follow;
@@ -249,10 +257,14 @@
 
         gameWindow.addEventListener('mouseup', () => {
             if(!options.show) return;
+            if (e.which !== 1) return;
             if(!options.follow) setTimeout(getCenter, 100);
         }, false);
 
-        gameWindow.addEventListener('mousemove', () => {
+        gameWindow.addEventListener('mousemove', mouseMove, false);
+        gameWindow.addEventListener('wheel', mouseMove, false);
+
+        function mouseMove() {
             if(!options.show) return;
             const x_new = coorDOM.innerHTML.replace(rec, '$1');
             const y_new = coorDOM.innerHTML.replace(rec, '$2');
@@ -267,8 +279,7 @@
                 }
                 loadTemplates();
             }
-        }, false);
-
+        }
         // Setting up config
         GM_config.init({
             'id': 'minimap',
@@ -281,7 +292,7 @@
                     'default': '[\n{"url":"uk7uvv.png","height":360,"width":360,"x":3059,"y":-15374}\n]'
                 }
             },
-            'css': '.config_var { height: 80%; } textarea { width: 100%; height: 100%; }'
+            'css': '.config_var { height: 80%; } textarea { width: 100%; height: 100%; font-family: monospace !important; }'
         });
 
         GM_config.onSave = update;
