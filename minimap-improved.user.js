@@ -105,7 +105,9 @@
 
     window.addEventListener('load', () => {
         // Remove annoying alerts
-        document.querySelector("[role=alert]")?.remove();
+        setTimeout(() => {
+            document.querySelector("[role=alert]")?.remove();
+        }, 2000);
 
         // Regular Expression to get coordinates out of URL
         const re = /(.*)@(.*),(.*)/g;
@@ -115,8 +117,8 @@
         const gameWindow = document.getElementById("gameWindow");
 
         // DOM element of the displayed X, Y variables
-        let coorDOM = Array.from(Array.from(document.getElementById("app").children).slice(-1)[0].children).slice(-1)[0].children[0];
-
+        let coorDOM = Array.from(document.getElementById("app").children[0].children).filter(c => c?.children[0]?.innerText.includes(","))[0].children[0];
+        
         // coordinates of the middle of the window
         let x_window = 0;
         let y_window = 0;
