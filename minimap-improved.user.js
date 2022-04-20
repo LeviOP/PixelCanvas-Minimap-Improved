@@ -291,7 +291,7 @@
                 {
                     'label': 'Templates',
                     'type': 'textarea',
-                    'default': '[\n{"url":"uk7uvv.png","height":360,"width":360,"x":3059,"y":-15374}\n]'
+                    'default': '[\n  {\n    "url":"https://raw.githubusercontent.com/LeviOP/PixelCanvas-Minimap-Improved/main/wikipedia-logo-transparent.png",\n    "height":77,\n    "width":84,\n    "x":-319,\n    "y":207\n  }\n]'
                 }
             },
             'css': '.config_var { height: 80%; } textarea { width: 100%; height: 100%; font-family: monospace !important; }'
